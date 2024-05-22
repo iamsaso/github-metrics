@@ -10,15 +10,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/go-github/v50/github"
 	"golang.org/x/oauth2"
 )
-
-var rateLimitReset int64
-var mu sync.Mutex
 
 type UserMetrics struct {
 	Commits int
@@ -32,8 +28,8 @@ type UserMetrics struct {
 }
 
 type UserMetricsView struct {
-	User    string
-	Metrics UserMetrics
+	User         string
+	Metrics      UserMetrics
 	CreatedSince string
 	Organization string
 }
@@ -256,8 +252,8 @@ func renderTemplate(metrics map[string]UserMetrics, days int, organization strin
 	var sortedMetrics []UserMetricsView
 	for user, metric := range metrics {
 		sortedMetrics = append(sortedMetrics, UserMetricsView{
-			User: user, 
-			Metrics: metric, 
+			User:         user,
+			Metrics:      metric,
 			CreatedSince: time.Now().AddDate(0, 0, -days).Format("2006-01-02"),
 			Organization: organization,
 		})
