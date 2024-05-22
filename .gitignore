@@ -22,4 +22,6 @@ go.work
 go.work.sum
 
 .githubmetrics
+.githubmetrics*
 metrics.html
+*metrics.html

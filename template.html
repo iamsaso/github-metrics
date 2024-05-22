@@ -60,6 +60,7 @@
                 <th>Pulls</th>
                 <th>Reviews</th>
                 <th>Score</th>
+                <th>Top Repositories</th>
             </tr>
         </thead>
         <tbody>
@@ -74,6 +75,7 @@
                 <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+author:{{.User}}+type:pr+is:merged+created:>{{.CreatedSince}}&type=pullrequests">{{.Metrics.Pulls}}</a></td>
                 <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+reviewed-by:{{.User}}+created:>{{.CreatedSince}}&type=pullrequests">{{.Metrics.Reviews}}</a></td>
                 <td>{{printf "%.2f" .Metrics.Score}}</td>
+                <td>{{.TopRepos}}</td>
             </tr>
             {{end}}
         </tbody>

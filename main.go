@@ -25,6 +25,7 @@ type UserMetrics struct {
 	Pulls   int
 	Reviews int
 	Score   float64
+	Repos   map[string]int // Repositories touched and lines changed
 }
 
 type UserMetricsView struct {
@@ -32,17 +33,24 @@ type UserMetricsView struct {
 	Metrics      UserMetrics
 	CreatedSince string
 	Organization string
+	TopRepos     string // Top 3 repositories formatted as org/repo(LoC)
 }
+
+var (
+	client        *github.Client
+	verbose       bool
+	days          int
+	organization  string
+	delay         int
+	metricsFile   string
+	outputFile    string
+)
 
 func main() {
 	var token string
-	var days int
 	var coders coderList
 	var repos repoList
-	var verbose bool
 	var metric string
-	var delay int
-	var organization string
 
 	// Define flags
 	flag.StringVar(&token, "token", "", "GitHub token")
@@ -53,12 +61,15 @@ func main() {
 	flag.StringVar(&metric, "metric", "all", "Specific metric to calculate (commits, hoc, issues, lcp, msgs, pulls, reviews, score)")
 	flag.IntVar(&delay, "delay", 30, "Delay between API calls in seconds")
 	flag.StringVar(&organization, "organization", "", "GitHub organization to filter repositories")
+	flag.StringVar(&metricsFile, "metrics-file", ".githubmetrics", "Path to the metrics configuration file")
+	flag.StringVar(&outputFile, "output-file", "metrics.html", "Path to the output file")
 
-	// Check for .githubmetrics file
-	if _, err := os.Stat(".githubmetrics"); err == nil {
-		file, err := os.Open(".githubmetrics")
+	flag.Parse()
+
+	if _, err := os.Stat(metricsFile); err == nil {
+		file, err := os.Open(metricsFile)
 		if err != nil {
-			log.Fatalf("Error opening .githubmetrics file: %v", err)
+			log.Fatalf("Error opening metrics file: %v", err)
 		}
 		defer file.Close()
 
@@ -96,7 +107,7 @@ func main() {
 		}
 
 		if err := scanner.Err(); err != nil {
-			log.Fatalf("Error reading .githubmetrics file: %v", err)
+			log.Fatalf("Error reading metrics file: %v", err)
 		}
 	}
 
@@ -107,10 +118,10 @@ func main() {
 		log.Fatal("No repositories or organization specified. Use --repo to add repositories or --organization to filter by organization.")
 	}
 
-	client := createGitHubClient(token)
-	metrics := calculateMetrics(client, coders, days, metric, delay, organization, verbose)
+	client = createGitHubClient(token)
+	metrics := calculateMetrics(coders, metric)
 
-	err := renderTemplate(metrics, days, organization)
+	err := renderTemplate(metrics)
 	if err != nil {
 		log.Fatalf("Error rendering template: %v", err)
 	}
@@ -147,13 +158,13 @@ func createGitHubClient(token string) *github.Client {
 	return github.NewClient(tc)
 }
 
-func calculateMetrics(client *github.Client, users []string, days int, metric string, delay int, organization string, verbose bool) map[string]UserMetrics {
+func calculateMetrics(users []string, metric string) map[string]UserMetrics {
 	if verbose {
 		log.Printf("Calculating %s metric for %d users for %d days\n", metric, len(users), days)
 	}
 	metrics := make(map[string]UserMetrics)
 	for _, user := range users {
-		repos := getUserRepositories(client, user, days, delay, organization, verbose)
+		repos := getUserRepositories(user)
 		fmt.Printf("User %s has %d repositories\n", user, len(repos))
 		for _, repoFullName := range repos {
 			owner, repoName := parseRepo(repoFullName)
@@ -164,48 +175,58 @@ func calculateMetrics(client *github.Client, users []string, days int, metric st
 
 			switch metric {
 			case "commits":
-				commits := getCommits(client, owner, repoName, user, days, delay, verbose)
+				commits := getCommits(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Commits: commits})
 			case "hoc":
-				hoc := getHoC(client, owner, repoName, user, days, delay, verbose)
-				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{HoC: hoc})
+				hoc := getHoC(owner, repoName, user)
+				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{HoC: hoc, Repos: map[string]int{repoFullName: hoc}})
 			case "issues":
-				issues := getIssues(client, owner, repoName, user, days, delay)
+				issues := getIssues(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Issues: issues})
 			case "lcp":
-				lcp := getLcP(client, owner, repoName, user, days, delay, verbose)
+				lcp := getLcP(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{LcP: lcp})
 			case "msgs":
-				msgs := getMsgs(client, owner, repoName, user, days, delay, verbose)
+				msgs := getMsgs(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Msgs: msgs})
 			case "pulls":
-				pulls := getPulls(client, owner, repoName, user, days, delay, verbose)
+				pulls := getPulls(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Pulls: pulls})
 			case "reviews":
-				reviews := getReviews(client, owner, repoName, user, days, delay, verbose)
+				reviews := getReviews(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Reviews: reviews})
 			case "all":
-				commits := getCommits(client, owner, repoName, user, days, delay, verbose)
-				hoc := getHoC(client, owner, repoName, user, days, delay, verbose)
-				issues := getIssues(client, owner, repoName, user, days, delay)
-				lcp := getLcP(client, owner, repoName, user, days, delay, verbose)
-				msgs := getMsgs(client, owner, repoName, user, days, delay, verbose)
-				pulls := getPulls(client, owner, repoName, user, days, delay, verbose)
-				reviews := getReviews(client, owner, repoName, user, days, delay, verbose)
+				commits := getCommits(owner, repoName, user)
+				hoc := getHoC(owner, repoName, user)
+				issues := getIssues(owner, repoName, user)
+				lcp := getLcP(owner, repoName, user)
+				msgs := getMsgs(owner, repoName, user)
+				pulls := getPulls(owner, repoName, user)
+				reviews := getReviews(owner, repoName, user)
 				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{
-					Commits: commits, HoC: hoc, Issues: issues, LcP: lcp, Msgs: msgs, Pulls: pulls, Reviews: reviews,
+					Commits: commits,
+					HoC:     hoc,
+					Issues:  issues,
+					LcP:     lcp,
+					Msgs:    msgs,
+					Pulls:   pulls,
+					Reviews: reviews,
+					Repos:   map[string]int{repoFullName: hoc},
 				})
-				metrics[user] = updateUserMetrics(metrics[user], UserMetrics{Score: calculateScore(metrics[user])})
 			default:
 				log.Fatalf("Unknown metric: %s", metric)
 			}
+		}
+		err := renderTemplate(metrics)
+		if err != nil {
+			log.Fatalf("Error rendering template: %v", err)
 		}
 	}
 
 	return metrics
 }
 
-func retryWithBackoff(ctx context.Context, attempts int, delay time.Duration, fn func() (interface{}, *github.Response, error)) (interface{}, *github.Response, error) {
+func retryWithBackoff(_ context.Context, attempts int, delay time.Duration, fn func() (interface{}, *github.Response, error)) (interface{}, *github.Response, error) {
 	var err error
 
 	for i := 0; i < attempts; i++ {
@@ -240,7 +261,16 @@ func updateUserMetrics(metrics, update UserMetrics) UserMetrics {
 	metrics.Msgs += update.Msgs
 	metrics.Pulls += update.Pulls
 	metrics.Reviews += update.Reviews
-	metrics.Score += update.Score
+
+	if metrics.Repos == nil {
+		metrics.Repos = make(map[string]int)
+	}
+	for repo, hoc := range update.Repos {
+		metrics.Repos[repo] += hoc
+	}
+
+	metrics.Score = calculateScore(metrics)
+
 	return metrics
 }
 
@@ -248,14 +278,16 @@ func calculateScore(metrics UserMetrics) float64 {
 	return float64(metrics.HoC) + float64(metrics.Pulls)*250 + float64(metrics.Issues)*50 + float64(metrics.Commits)*5 + float64(metrics.Reviews)*150 + float64(metrics.Msgs)*5
 }
 
-func renderTemplate(metrics map[string]UserMetrics, days int, organization string) error {
+func renderTemplate(metrics map[string]UserMetrics) error {
 	var sortedMetrics []UserMetricsView
 	for user, metric := range metrics {
+		topRepos := getTopRepos(metric.Repos)
 		sortedMetrics = append(sortedMetrics, UserMetricsView{
 			User:         user,
 			Metrics:      metric,
 			CreatedSince: time.Now().AddDate(0, 0, -days).Format("2006-01-02"),
 			Organization: organization,
+			TopRepos:     topRepos,
 		})
 	}
 
@@ -268,13 +300,32 @@ func renderTemplate(metrics map[string]UserMetrics, days int, organization strin
 		return err
 	}
 
-	file, err := os.Create("metrics.html")
+	file, err := os.Create(outputFile)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
 	return tmpl.Execute(file, sortedMetrics)
+}
+
+func getTopRepos(repos map[string]int) string {
+	type repo struct {
+		Name string
+		HoC  int
+	}
+	var repoList []repo
+	for name, hoc := range repos {
+		repoList = append(repoList, repo{Name: name, HoC: hoc})
+	}
+	sort.Slice(repoList, func(i, j int) bool {
+		return repoList[i].HoC > repoList[j].HoC
+	})
+	var topRepos []string
+	for i := 0; i < len(repoList) && i < 3; i++ {
+		topRepos = append(topRepos, fmt.Sprintf("%s(%d)", repoList[i].Name, repoList[i].HoC))
+	}
+	return strings.Join(topRepos, ", ")
 }
 
 func parseRepo(repo string) (string, string) {
@@ -285,7 +336,7 @@ func parseRepo(repo string) (string, string) {
 	return parts[0], parts[1]
 }
 
-func getCommits(client *github.Client, owner, repo, user string, days, delay int, verbose bool) int {
+func getCommits(owner, repo, user string) int {
 	ctx := context.Background()
 	commits := 0
 	opts := &github.CommitsListOptions{
@@ -322,7 +373,7 @@ func getCommits(client *github.Client, owner, repo, user string, days, delay int
 	return commits
 }
 
-func getHoC(client *github.Client, owner, repo, user string, days, delay int, verbose bool) int {
+func getHoC(owner, repo, user string) int {
 	ctx := context.Background()
 	hoc := 0
 	opts := &github.CommitsListOptions{
@@ -366,7 +417,7 @@ func getHoC(client *github.Client, owner, repo, user string, days, delay int, ve
 	return hoc
 }
 
-func getIssues(client *github.Client, owner, repo, user string, days, delay int) int {
+func getIssues(owner, repo, user string) int {
 	ctx := context.Background()
 	issues := 0
 	opts := &github.IssueListByRepoOptions{
@@ -378,6 +429,9 @@ func getIssues(client *github.Client, owner, repo, user string, days, delay int)
 	}
 
 	for {
+		if verbose {
+			log.Printf("Fetching issues for user %s in repo %s/%s\n", user, owner, repo)
+		}
 		result, resp, err := retryWithBackoff(ctx, 5, time.Second, func() (interface{}, *github.Response, error) {
 			return client.Issues.ListByRepo(ctx, owner, repo, opts)
 		})
@@ -389,6 +443,9 @@ func getIssues(client *github.Client, owner, repo, user string, days, delay int)
 		for _, issue := range issueList {
 			if !issue.IsPullRequest() {
 				issues++
+				if verbose {
+					log.Printf("Found issue #%d by %s in repo %s/%s\n", issue.GetNumber(), user, owner, repo)
+				}
 			}
 		}
 		if resp.NextPage == 0 {
@@ -397,10 +454,14 @@ func getIssues(client *github.Client, owner, repo, user string, days, delay int)
 		opts.Page = resp.NextPage
 	}
 
+	if verbose {
+		log.Printf("Total issues for user %s in repo %s/%s: %d\n", user, owner, repo, issues)
+	}
+
 	return issues
 }
 
-func getLcP(client *github.Client, owner, repo, user string, days, delay int, verbose bool) float64 {
+func getLcP(owner, repo, user string) float64 {
 	ctx := context.Background()
 	totalTime := 0.0
 	count := 0
@@ -424,7 +485,7 @@ func getLcP(client *github.Client, owner, repo, user string, days, delay int, ve
 		issues := result.([]*github.Issue)
 		for _, issue := range issues {
 			if issue.IsPullRequest() && issue.CreatedAt != nil && issue.ClosedAt != nil {
-				duration := issue.ClosedAt.Sub(*&issue.CreatedAt.Time).Hours()
+				duration := issue.ClosedAt.Sub(issue.CreatedAt.Time).Hours()
 				totalTime += duration
 				count++
 				if verbose {
@@ -449,7 +510,7 @@ func getLcP(client *github.Client, owner, repo, user string, days, delay int, ve
 	return averageLifecycle
 }
 
-func getMsgs(client *github.Client, owner, repo, user string, days, delay int, verbose bool) int {
+func getMsgs(owner, repo, user string) int {
 	ctx := context.Background()
 	msgs := 0
 	query := fmt.Sprintf("repo:%s/%s is:pr commenter:%s created:>%s", owner, repo, user, time.Now().AddDate(0, 0, -days).Format("2006-01-02"))
@@ -485,7 +546,7 @@ func getMsgs(client *github.Client, owner, repo, user string, days, delay int, v
 	return msgs
 }
 
-func getPulls(client *github.Client, owner, repo, user string, days, delay int, verbose bool) int {
+func getPulls(owner, repo, user string) int {
 	ctx := context.Background()
 	pulls := 0
 	query := fmt.Sprintf("repo:%s/%s is:pr author:%s merged:>%s", owner, repo, user, time.Now().AddDate(0, 0, -days).Format("2006-01-02"))
@@ -523,7 +584,7 @@ func getPulls(client *github.Client, owner, repo, user string, days, delay int, 
 	return pulls
 }
 
-func getReviews(client *github.Client, owner, repo, user string, days, delay int, verbose bool) int {
+func getReviews(owner, repo, user string) int {
 	ctx := context.Background()
 	reviewsCount := 0
 	query := fmt.Sprintf("repo:%s/%s reviewed-by:%s is:pr merged:>%s", owner, repo, user, time.Now().AddDate(0, 0, -days).Format("2006-01-02"))
@@ -541,7 +602,7 @@ func getReviews(client *github.Client, owner, repo, user string, days, delay int
 		})
 		issues := result.(*github.IssuesSearchResult)
 		if err != nil {
-			log.Printf("Error fetching reviewed pull requests for user %s in repo %s/%s: %v\n", user, err)
+			log.Printf("Error fetching reviewed pull requests for user %s in repo %s/%s: %v\n", user, owner, repo, err)
 			return reviewsCount
 		}
 		for _, issue := range issues.Issues {
@@ -558,11 +619,12 @@ func getReviews(client *github.Client, owner, repo, user string, days, delay int
 
 	return reviewsCount
 }
+
 func isMergeCommit(commit *github.RepositoryCommit) bool {
 	return commit.Parents != nil && len(commit.Parents) > 1
 }
 
-func getUserRepositories(client *github.Client, user string, days, delay int, organization string, verbose bool) []string {
+func getUserRepositories(user string) []string {
 	ctx := context.Background()
 	reposMap := make(map[string]bool)
 	since := time.Now().AddDate(0, 0, -days)
