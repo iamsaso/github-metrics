@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Metrics</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+        }
+        table {
+            width: 90%;
+            margin: 20px auto;
+            border-collapse: collapse;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        td a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        td a:hover {
+            text-decoration: underline;
+        }
+        .explanation {
+            width: 90%;
+            margin: 20px auto;
+            background-color: #fff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>GitHub Metrics</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Commits</th>
+                <th>HoC</th>
+                <th>Issues</th>
+                <th>LcP</th>
+                <th>Msgs</th>
+                <th>Pulls</th>
+                <th>Reviews</th>
+                <th>Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr>
+                <td>{{.User}}</td>
+                <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+author:{{.User}}+author-date:>{{.CreatedSince}}&type=commits">{{.Metrics.Commits}}</a></td>
+                <td>{{.Metrics.HoC}}</td>
+                <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+author:{{.User}}+type:issue+created:>{{.CreatedSince}}">{{.Metrics.Issues}}</a></td>
+                <td>{{printf "%.2f" .Metrics.LcP}}</td>
+                <td>{{.Metrics.Msgs}}</td>
+                <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+author:{{.User}}+type:pr+is:merged+created:>{{.CreatedSince}}&type=pullrequests">{{.Metrics.Pulls}}</a></td>
+                <td><a target="_blank" href="https://github.com/search?q=user:{{.Organization}}+reviewed-by:{{.User}}+created:>{{.CreatedSince}}&type=pullrequests">{{.Metrics.Reviews}}</a></td>
+                <td>{{printf "%.2f" .Metrics.Score}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    <div class="explanation">
+        <p><strong>Commits:</strong> Total number of non-merge Git commits to the default branch, authored by the user.</p>
+        <p><strong>HoC:</strong> Total number of user's hits of code.</p>
+        <p><strong>Issues:</strong> Total number of issues submitted by the user.</p>
+        <p><strong>LcP:</strong> Average lifecycle of a pull request in hours.</p>
+        <p><strong>Msgs:</strong> Total number of messages posted in pull requests where the user was a reviewer.</p>
+        <p><strong>Pulls:</strong> Total number of pull requests created by the user and already merged.</p>
+        <p><strong>Reviews:</strong> Total number of merged pull requests that were reviewed by the user.</p>
+        <p><strong>Score:</strong> Arithmetic summary of all metrics with multipliers: 1×HoC + 250×Pulls + 50×Issues + 5×Commits + 150×Reviews + 5×Msgs</p>
+    </div>
+</body>
+</html>
